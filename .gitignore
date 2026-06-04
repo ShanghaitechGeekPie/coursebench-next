@@ -40,3 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# local-only Kubernetes secrets (apply manually, never commit real values)
+/k8s/local/*.yaml
+!/k8s/local/*.example.yaml

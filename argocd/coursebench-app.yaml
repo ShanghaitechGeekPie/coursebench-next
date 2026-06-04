@@ -11,6 +11,7 @@ spec:
     path: k8s
     directory:
       recurse: true
+      exclude: '{local/*,local/**/*}'
   destination:
     server: https://kubernetes.default.svc
     namespace: coursebench

@@ -38,15 +38,3 @@ spec:
   # Affinity off — single node, both instances on same node
   affinity:
     enablePodAntiAffinity: false
-
----
-# Credentials for the app user (referenced by bootstrap.initdb.secret)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: coursebench-pg-app-credentials
-  namespace: coursebench
-type: kubernetes.io/basic-auth
-stringData:
-  username: app
-  password: CHANGE_ME_PG_PASSWORD  # Change this before applying
