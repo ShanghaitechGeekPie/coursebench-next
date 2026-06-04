@@ -15,6 +15,9 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
+ARG DATABASE_URL="postgresql://build:build@localhost/build"
+ARG REDIS_URL="redis://localhost:6379"
+
 RUN pnpm build
 
 # Stage 3: Production

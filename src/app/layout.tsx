@@ -10,7 +10,6 @@ import { SearchProvider } from "@/contexts/SearchContext";
 import { SnackbarProvider } from "@/contexts/SnackbarContext";
 import { CourseFilterProvider } from "@/contexts/CourseFilterContext";
 import { Header, Footer, ProgressBar } from "@/components/layout";
-import { Analytics } from "@vercel/analytics/next";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -55,7 +54,6 @@ export default function RootLayout({
             </AuthProvider>
           </SWRProvider>
         </ThemeRegistry>
-        <Analytics />
       </body>
     </html>
   );

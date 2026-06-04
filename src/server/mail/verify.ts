@@ -1,11 +1,8 @@
-import { Redis } from "@upstash/redis";
+import Redis from "ioredis";
 import { randomUUID } from "crypto";
 import { sendMail } from "./send";
 
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
+const redis = new Redis(process.env.REDIS_URL!);
 
 const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000";
 const SERVICE_NAME = process.env.SERVICE_NAME || "GeekPie_ CourseBench 评教平台";
@@ -28,7 +25,7 @@ export async function postMail(
 
   const code = randomUUID();
   const key = `${service}:${userId}`;
-  await redis.set(key, code, { ex: CODE_TTL });
+  await redis.set(key, code, "EX", CODE_TTL);
 
   const activeURL = `${SERVER_URL}/${urlPath}?id=${userId}&code=${code}`;
   await sendMail(email, subject, body, activeURL);
@@ -42,7 +39,7 @@ export async function checkCode(userId: number, code: string, service: string): 
   if (process.env.DISABLE_MAIL === "true") return true;
 
   const key = `${service}:${userId}`;
-  const stored = await redis.get<string>(key);
+  const stored = await redis.get(key);
 
   if (!stored) return false;
   if (stored !== code) return false;

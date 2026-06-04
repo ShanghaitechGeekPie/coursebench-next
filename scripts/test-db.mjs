@@ -1,12 +1,12 @@
 import { readFileSync } from 'fs';
-import { neon } from '@neondatabase/serverless';
+import postgres from 'postgres';
 
 // Load .env.local
 const envContent = readFileSync(new URL('../.env.local', import.meta.url), 'utf-8');
 const dbUrl = envContent.match(/^DATABASE_URL="(.+)"$/m)?.[1];
 if (!dbUrl) { console.error('DATABASE_URL not found in .env.local'); process.exit(1); }
 
-const sql = neon(dbUrl);
+const sql = postgres(dbUrl);
 
 try {
   const result = await sql`SELECT current_database(), current_user`;
@@ -44,4 +44,6 @@ try {
 } catch (e) {
   console.error('ERROR:', e.message);
   process.exit(1);
+} finally {
+  await sql.end();
 }

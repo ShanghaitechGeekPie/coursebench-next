@@ -5,8 +5,8 @@ const envContent = readFileSync(new URL('../.env.local', import.meta.url), 'utf-
 const dbUrl = envContent.match(/^DATABASE_URL="(.+)"$/m)?.[1];
 process.env.DATABASE_URL = dbUrl;
 
-const { neon } = await import('@neondatabase/serverless');
-const { drizzle } = await import('drizzle-orm/neon-http');
+const postgres = (await import('postgres')).default;
+const { drizzle } = await import('drizzle-orm/postgres-js');
 const { eq, isNull, desc } = await import('drizzle-orm');
 
 // Import schema dynamically (it's TypeScript, so we need the compiled version)
@@ -36,7 +36,7 @@ const courses = pgTable('courses', {
   commentCount: bigintCol('comment_count'),
 });
 
-const sql = neon(dbUrl);
+const sql = postgres(dbUrl);
 const db = drizzle(sql, { schema: { users, courses } });
 
 try {
@@ -59,4 +59,6 @@ try {
 } catch (e) {
   console.error('ERROR:', e);
   process.exit(1);
+} finally {
+  await sql.end();
 }
