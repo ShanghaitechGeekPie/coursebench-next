@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: coursebench
+  namespace: argocd
+spec:
+  description: CourseBench GitOps project
+  sourceRepos:
+    - https://github.com/ShanghaitechGeekPie/coursebench-next.git
+  destinations:
+    - namespace: coursebench
+      server: https://kubernetes.default.svc
+    - namespace: argocd
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace

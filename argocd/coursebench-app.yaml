@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coursebench
+  namespace: argocd
+spec:
+  project: coursebench
+  source:
+    repoURL: https://github.com/ShanghaitechGeekPie/coursebench-next.git
+    targetRevision: master
+    path: k8s
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: coursebench
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
