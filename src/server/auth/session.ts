@@ -1,4 +1,4 @@
-import { getIronSession, type IronSession } from "iron-session";
+import { getIronSession, type IronSession, type SessionOptions } from "iron-session";
 import { cookies } from "next/headers";
 
 export interface SessionData {
@@ -20,20 +20,22 @@ function getSessionSecret(): string {
   return secret;
 }
 
-const SESSION_OPTIONS = {
-  password: getSessionSecret(),
-  cookieName: "session_id",
-  cookieOptions: {
-    httpOnly: process.env.NODE_ENV === "production",
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    maxAge: 60 * 60 * 24 * 30, // 30 days
-  },
-};
+function getSessionOptions(): SessionOptions {
+  return {
+    password: getSessionSecret(),
+    cookieName: "session_id",
+    cookieOptions: {
+      httpOnly: process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+    },
+  };
+}
 
 export async function getSession(): Promise<IronSession<SessionData>> {
   const cookieStore = await cookies();
-  return getIronSession<SessionData>(cookieStore, SESSION_OPTIONS);
+  return getIronSession<SessionData>(cookieStore, getSessionOptions());
 }
 
 export async function getUserId(): Promise<number | null> {

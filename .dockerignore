@@ -1,0 +1,8 @@
+.git
+.github
+.next
+node_modules
+conversation.log
+*.log
+.env
+.env.*
