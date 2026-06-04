@@ -1,0 +1,52 @@
+# Requires CloudNativePG operator installed:
+#   kubectl apply --server-side -f \
+#     https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.25/releases/cnpg-1.25.1.yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: coursebench-pg
+  namespace: coursebench
+spec:
+  instances: 2  # 1 primary + 1 replica on single node
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "256MB"
+      effective_cache_size: "512MB"
+      work_mem: "4MB"
+
+  bootstrap:
+    initdb:
+      database: coursebench
+      owner: app
+      secret:
+        name: coursebench-pg-app-credentials
+
+  storage:
+    size: 10Gi
+    # storageClass: local-path  # Uncomment for k3s
+
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+  # Affinity off — single node, both instances on same node
+  affinity:
+    enablePodAntiAffinity: false
+
+---
+# Credentials for the app user (referenced by bootstrap.initdb.secret)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: coursebench-pg-app-credentials
+  namespace: coursebench
+type: kubernetes.io/basic-auth
+stringData:
+  username: app
+  password: CHANGE_ME_PG_PASSWORD  # Change this before applying

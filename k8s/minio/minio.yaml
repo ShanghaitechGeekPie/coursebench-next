@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coursebench-minio
+  namespace: coursebench
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # MinIO single instance can't do rolling update
+  selector:
+    matchLabels:
+      app: coursebench-minio
+  template:
+    metadata:
+      labels:
+        app: coursebench-minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args: ["server", "/data", "--console-address", ":9001"]
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: coursebench-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: coursebench-secrets
+                  key: MINIO_SECRET_KEY
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: coursebench-minio-data
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: coursebench-minio-data
+  namespace: coursebench
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName: local-path  # Uncomment for k3s
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coursebench-minio
+  namespace: coursebench
+spec:
+  selector:
+    app: coursebench-minio
+  ports:
+    - port: 9000
+      targetPort: 9000
+      name: api
+    - port: 9001
+      targetPort: 9001
+      name: console

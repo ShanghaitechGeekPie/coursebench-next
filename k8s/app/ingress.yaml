@@ -1,0 +1,31 @@
+# Option A: Cloudflare proxy (recommended — handles TLS + DDoS)
+# Set Cloudflare SSL mode to "Full (strict)" and use an origin certificate.
+#
+# Option B: cert-manager + Let's Encrypt
+# Uncomment the cert-manager annotation and tls block below.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: coursebench-ingress
+  namespace: coursebench
+  annotations:
+    # cert-manager.io/cluster-issuer: letsencrypt-prod  # Uncomment for Option B
+    nginx.ingress.kubernetes.io/proxy-body-size: "2m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: coursebench.org  # Change to your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: coursebench-app
+                port:
+                  number: 80
+  # Uncomment for Option B (cert-manager):
+  # tls:
+  #   - hosts:
+  #       - coursebench.org
+  #     secretName: coursebench-tls

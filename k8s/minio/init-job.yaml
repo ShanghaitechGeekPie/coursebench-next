@@ -1,0 +1,35 @@
+# One-time job: create the bucket and set avatar/ prefix to public-read.
+# Run after MinIO is ready:
+#   kubectl apply -f init-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init-bucket
+  namespace: coursebench
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          env:
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: coursebench-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: coursebench-secrets
+                  key: MINIO_SECRET_KEY
+          command:
+            - /bin/sh
+            - -c
+            - |
+              mc alias set local http://coursebench-minio:9000 "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
+              mc mb --ignore-existing local/coursebench
+              mc anonymous set download local/coursebench/avatar
+              echo "Bucket 'coursebench' created, avatar/ set to public-read."

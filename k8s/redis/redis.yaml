@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coursebench-redis
+  namespace: coursebench
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coursebench-redis
+  template:
+    metadata:
+      labels:
+        app: coursebench-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 3
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: coursebench-redis-data
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: coursebench-redis-data
+  namespace: coursebench
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName: local-path  # Uncomment for k3s
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coursebench-redis
+  namespace: coursebench
+spec:
+  selector:
+    app: coursebench-redis
+  ports:
+    - port: 6379
+      targetPort: 6379
