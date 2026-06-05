@@ -1,12 +1,13 @@
 # Stage 1: Install dependencies
-FROM node:22-alpine AS deps
+ARG NODE_IMAGE=reg.geekpie.club/proxy/node:22-alpine
+FROM ${NODE_IMAGE} AS deps
 RUN corepack enable && corepack prepare pnpm@10 --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # Stage 2: Build
-FROM node:22-alpine AS builder
+FROM ${NODE_IMAGE} AS builder
 RUN corepack enable && corepack prepare pnpm@10 --activate
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
@@ -21,7 +22,7 @@ ARG REDIS_URL="redis://localhost:6379"
 RUN pnpm build
 
 # Stage 3: Production
-FROM node:22-alpine AS runner
+FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

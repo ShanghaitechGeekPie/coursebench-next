@@ -19,7 +19,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: backup
-              image: postgres:16-alpine
+              image: reg.geekpie.club/proxy/postgres:16-alpine
               env:
                 - name: SOURCE_URL
                   # CloudNativePG primary service
