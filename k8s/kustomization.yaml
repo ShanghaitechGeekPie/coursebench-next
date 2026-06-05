@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - postgres/cluster.yaml
+  - redis/redis.yaml
+  - minio/minio.yaml
+  - minio/init-job.yaml
+  - app/deployment.yaml
+  - app/ingress.yaml
+  - backup/cronjob.yaml

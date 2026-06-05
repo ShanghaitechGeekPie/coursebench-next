@@ -13,9 +13,6 @@ spec:
     repoURL: https://github.com/ShanghaitechGeekPie/coursebench-next.git
     targetRevision: master
     path: k8s
-    directory:
-      recurse: true
-      exclude: '{local/*,local/**/*}'
   destination:
     server: https://kubernetes.default.svc
     namespace: coursebench
