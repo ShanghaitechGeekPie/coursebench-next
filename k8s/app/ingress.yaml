@@ -9,10 +9,14 @@ metadata:
   name: coursebench-ingress
   namespace: coursebench
   annotations:
-    # cert-manager.io/cluster-issuer: letsencrypt-prod  # Uncomment for Option B
+    cert-manager.io/cluster-issuer: "letsencrypt-prod-dns"
     nginx.ingress.kubernetes.io/proxy-body-size: "2m"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - coursebench.org
+      secretName: coursebench-tls
   rules:
     - host: coursebench.org  # Change to your domain
       http:
@@ -24,8 +28,3 @@ spec:
                 name: coursebench-app
                 port:
                   number: 80
-  # Uncomment for Option B (cert-manager):
-  # tls:
-  #   - hosts:
-  #       - coursebench.org
-  #     secretName: coursebench-tls
