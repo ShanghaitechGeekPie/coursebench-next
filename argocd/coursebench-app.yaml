@@ -6,6 +6,7 @@ metadata:
   annotations:
     argocd-image-updater.argoproj.io/image-list: app=reg.geekpie.club/proxy/shanghaitechgeekpie/coursebench-next
     argocd-image-updater.argoproj.io/app.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/app.ignore-tags: latest
 spec:
   project: coursebench
   source:
