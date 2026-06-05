@@ -18,6 +18,8 @@ ENV NODE_ENV=production
 
 ARG DATABASE_URL="postgresql://build:build@localhost/build"
 ARG REDIS_URL="redis://localhost:6379"
+ARG NEXT_PUBLIC_SERVER_URL=""
+ARG NEXT_PUBLIC_TURNSTILE_SITE_KEY=""
 
 RUN pnpm build
 
