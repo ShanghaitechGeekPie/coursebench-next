@@ -4,9 +4,8 @@ metadata:
   name: coursebench
   namespace: argocd
   annotations:
-    argocd-image-updater.argoproj.io/image-list: app=ghcr.io/shanghaitechgeekpie/coursebench-next
+    argocd-image-updater.argoproj.io/image-list: app=reg.geekpie.club/proxy/shanghaitechgeekpie/coursebench-next
     argocd-image-updater.argoproj.io/app.update-strategy: newest-build
-    argocd-image-updater.argoproj.io/app.kustomize.image-name: reg.geekpie.club/proxy/shanghaitechgeekpie/coursebench-next
 spec:
   project: coursebench
   source:
