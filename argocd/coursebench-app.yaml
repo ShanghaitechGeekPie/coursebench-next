@@ -3,6 +3,10 @@ kind: Application
 metadata:
   name: coursebench
   namespace: argocd
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: app=ghcr.io/shanghaitechgeekpie/coursebench-next
+    argocd-image-updater.argoproj.io/app.update-strategy: newest-build
+    argocd-image-updater.argoproj.io/app.kustomize.image-name: reg.geekpie.club/proxy/shanghaitechgeekpie/coursebench-next
 spec:
   project: coursebench
   source:
@@ -15,7 +19,35 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: coursebench
+  ignoreDifferences:
+    - group: postgresql.cnpg.io
+      kind: Cluster
+      jqPathExpressions:
+        - .spec.bootstrap.initdb.encoding
+        - .spec.bootstrap.initdb.localeCType
+        - .spec.bootstrap.initdb.localeCollate
+        - .spec.enablePDB
+        - .spec.enableSuperuserAccess
+        - .spec.failoverDelay
+        - .spec.logLevel
+        - .spec.maxSyncReplicas
+        - .spec.minSyncReplicas
+        - .spec.monitoring
+        - .spec.postgresGID
+        - .spec.postgresUID
+        - .spec.primaryUpdateMethod
+        - .spec.primaryUpdateStrategy
+        - .spec.replicationSlots
+        - .spec.resources.limits.cpu
+        - .spec.smartShutdownTimeout
+        - .spec.startDelay
+        - .spec.stopDelay
+        - .spec.switchoverDelay
+        - .spec.postgresql.parameters
+        - .spec.postgresql.syncReplicaElectionConstraint
+        - .spec.storage.resizeInUseVolumes
   syncPolicy:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true
