@@ -16,15 +16,12 @@ spec:
       activeDeadlineSeconds: 1800  # 30 min timeout
       template:
         spec:
-          restartPolicy: OnFailure
+          restartPolicy: Never
           containers:
             - name: backup
-              image: postgres:16-alpine
+              image: postgres:17-alpine
               env:
-                - name: SOURCE_URL
-                  # CloudNativePG primary service
-                  value: "postgresql://app:$(PG_PASSWORD)@coursebench-pg-rw:5432/coursebench"
-                - name: PG_PASSWORD
+                - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
                       name: coursebench-pg-app-credentials
@@ -39,11 +36,10 @@ spec:
                 - -e
                 - -c
                 - |
-                  export SOURCE_URL="postgresql://app:${PG_PASSWORD}@coursebench-pg-rw:5432/coursebench"
                   echo "[$(date -Iseconds)] Starting backup to Neon..."
 
-                  # Dump from local PG (custom format, no owner/privileges)
-                  pg_dump "$SOURCE_URL" \
+                  # Dump from local PG using PGPASSWORD env var (no password in URL)
+                  pg_dump -h coursebench-pg-rw -U app -d coursebench \
                     --format=custom \
                     --no-owner \
                     --no-privileges \
@@ -53,28 +49,13 @@ spec:
                   DUMP_SIZE=$(du -h /tmp/backup.dump | cut -f1)
                   echo "[$(date -Iseconds)] Dump complete: $DUMP_SIZE"
 
-                  # Restore to Neon (--clean drops+recreates objects, --if-exists avoids errors)
+                  # Wipe Neon schema and restore fresh
+                  psql "$NEON_URL" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO PUBLIC;"
                   pg_restore \
                     --dbname="$NEON_URL" \
                     --no-owner \
                     --no-privileges \
-                    --clean \
-                    --if-exists \
-                    --single-transaction \
-                    /tmp/backup.dump || true
-                  # pg_restore exits non-zero on warnings (e.g. "role does not exist"),
-                  # so we || true and rely on verification below.
-
-                  # Verify: compare row counts for key tables
-                  echo "[$(date -Iseconds)] Verifying..."
-                  for TABLE in users courses comments teachers; do
-                    SRC_COUNT=$(psql "$SOURCE_URL" -tAc "SELECT count(*) FROM $TABLE")
-                    DST_COUNT=$(psql "$NEON_URL" -tAc "SELECT count(*) FROM $TABLE")
-                    echo "  $TABLE: source=$SRC_COUNT neon=$DST_COUNT"
-                    if [ "$SRC_COUNT" != "$DST_COUNT" ]; then
-                      echo "  WARNING: count mismatch for $TABLE!"
-                    fi
-                  done
+                    /tmp/backup.dump
 
                   rm -f /tmp/backup.dump
                   echo "[$(date -Iseconds)] Backup to Neon complete."
