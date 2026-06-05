@@ -7,7 +7,7 @@ metadata:
   name: coursebench-pg
   namespace: coursebench
 spec:
-  imageName: reg.geekpie.club/proxy/ghcr.io/cloudnative-pg/postgresql:17.4
+  imageName: reg.geekpie.club/proxy/cloudnative-pg/postgresql:17.4
   instances: 2  # 1 primary + 1 replica on single node
 
   postgresql:

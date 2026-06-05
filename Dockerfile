@@ -1,5 +1,5 @@
 # Stage 1: Install dependencies
-ARG NODE_IMAGE=reg.geekpie.club/proxy/node:22-alpine
+ARG NODE_IMAGE=node:22-alpine
 FROM ${NODE_IMAGE} AS deps
 RUN corepack enable && corepack prepare pnpm@10 --activate
 WORKDIR /app

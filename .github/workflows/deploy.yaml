@@ -41,7 +41,6 @@ jobs:
           build-args: |
             DATABASE_URL=postgresql://build:build@localhost/build
             REDIS_URL=redis://localhost:6379
-            NODE_IMAGE=reg.geekpie.club/proxy/node:22-alpine
             NEXT_PUBLIC_SERVER_URL=${{ vars.NEXT_PUBLIC_SERVER_URL }}
             NEXT_PUBLIC_TURNSTILE_SITE_KEY=${{ vars.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
           cache-from: type=gha
