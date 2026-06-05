@@ -3,6 +3,8 @@ name: Build & Deploy
 on:
   push:
     branches: [master]
+    paths-ignore:
+      - 'k8s/app/deployment.yaml'
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
@@ -11,12 +13,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -45,3 +47,21 @@ jobs:
             NEXT_PUBLIC_TURNSTILE_SITE_KEY=${{ vars.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Update deployment image tag
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | head -c 7)
+          IMAGE_WITH_TAG="${{ env.IMAGE }}:${SHORT_SHA}"
+          # lowercase the image path (ghcr.io requires lowercase)
+          IMAGE_WITH_TAG=$(echo "$IMAGE_WITH_TAG" | tr '[:upper:]' '[:lower:]')
+          sed -i "s|image: .*|image: ${IMAGE_WITH_TAG}|" k8s/app/deployment.yaml
+          echo "Updated image to: ${IMAGE_WITH_TAG}"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/app/deployment.yaml
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "ci: update app image to ${{ github.sha }} [skip ci]"
+          git push
