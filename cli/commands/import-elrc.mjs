@@ -67,7 +67,7 @@ async function fetchCourseList(semInfo) {
   return allCourses;
 }
 
-async function fetchCourseDetail(serialNumber, semInfo) {
+export async function fetchCourseDetailFrom(endpoint, serialNumber, semInfo) {
   const params = new URLSearchParams({
     semester: semInfo.year,
     term: semInfo.termNum,
@@ -75,32 +75,160 @@ async function fetchCourseDetail(serialNumber, semInfo) {
     course_id: "undefined",
   });
 
-  const resp = await fetch(`${ELRC_BASE}/shanghaitechdatasync/datasync/bksCourse/?${params}`);
+  const resp = await fetch(`${ELRC_BASE}/shanghaitechdatasync/datasync/${endpoint}/?${params}`);
   if (!resp.ok) return null;
 
   const data = await resp.json();
   if (data.error_code !== "shanghaitech.0000.0000") return null;
-  return data;
+  return data.extend_message || null;
+}
+
+export function normalizeCourseDetail(extendMessage, kind) {
+  if (!extendMessage) return null;
+
+  const courseInfo = kind === "yjs"
+    ? extendMessage.JwPkKcxxYjs_instance
+    : extendMessage.JwPkKcxxBk_instance;
+  const activity = kind === "yjs"
+    ? extendMessage.KczxCourseActivityYjs_instance
+    : extendMessage.KczxCourseActivityBk_instance;
+
+  const creditValue = parseFloat(courseInfo?.credits ?? "");
+  const credit = Number.isFinite(creditValue) ? Math.floor(creditValue) : null;
+  const institute = activity?.college_name || null;
+
+  if (credit === null && !institute) return null;
+  return { credit, institute, kind };
+}
+
+export async function fetchCourseDetail(serialNumber, semInfo) {
+  const bkDetail = normalizeCourseDetail(await fetchCourseDetailFrom("bksCourse", serialNumber, semInfo), "bk");
+  if (bkDetail) return bkDetail;
+
+  return normalizeCourseDetail(await fetchCourseDetailFrom("yjsCourse", serialNumber, semInfo), "yjs");
+}
+
+function buildCourseBasics(courseInfo, detail) {
+  return {
+    name: courseInfo.name_,
+    credit: detail?.credit ?? null,
+    institute: detail?.institute || null,
+  };
+}
+
+function diffCourseBasics(existing, basics) {
+  const changes = {};
+
+  if (basics.name && basics.name !== existing.name) {
+    changes.name = { from: existing.name || "", to: basics.name };
+  }
+  if (basics.credit !== null && Number(existing.credit) !== basics.credit) {
+    changes.credit = { from: Number(existing.credit) || 0, to: basics.credit };
+  }
+  if (basics.institute && basics.institute !== existing.institute) {
+    changes.institute = { from: existing.institute || "", to: basics.institute };
+  }
+
+  return changes;
+}
+
+function courseTeacherSetKey(courseInfo) {
+  const teacherIds = (courseInfo.teacher || [])
+    .map((id) => parseInt(id, 10))
+    .filter((id) => Number.isFinite(id))
+    .sort((a, b) => a - b);
+  const uniqueTeacherIds = [...new Set(teacherIds)];
+  return `${courseInfo.courseNumber}:${uniqueTeacherIds.join(",")}`;
+}
+
+function uniqueSortedNumbers(values) {
+  return [...new Set(values.map(Number).filter(Number.isFinite))].sort((a, b) => a - b);
+}
+
+function teacherIdSetKey(teacherIds) {
+  return uniqueSortedNumbers(teacherIds).join(",");
+}
+
+function missingTeacherSetKey(teacherIds, teacherNames) {
+  const keys = [];
+  for (let i = 0; i < teacherIds.length; i++) {
+    const uniId = parseInt(teacherIds[i], 10);
+    const name = teacherNames[i] || "";
+    if (Number.isFinite(uniId) && name) keys.push(`${uniId}:${name}`);
+  }
+  return [...new Set(keys)].sort().join(",");
+}
+
+function expectedTeacherIdsForCourse(courseInfo, teachersByUniId, teachersByName) {
+  const teacherIds = [];
+  const missingTeacherUniIds = [];
+  const missingTeacherNames = [];
+  const teacherUniIds = courseInfo.teacher || [];
+  const teacherNames = courseInfo.teacher_names || [];
+
+  for (let i = 0; i < teacherUniIds.length; i++) {
+    const uniId = parseInt(teacherUniIds[i], 10);
+    const name = teacherNames[i] || "";
+    const teacher = (Number.isFinite(uniId) && teachersByUniId.get(String(uniId))) || teachersByName.get(name);
+    if (teacher) {
+      teacherIds.push(Number(teacher.id));
+    } else if (Number.isFinite(uniId) && name) {
+      missingTeacherUniIds.push(teacherUniIds[i]);
+      missingTeacherNames.push(name);
+    }
+  }
+
+  const hasMissingTeacher = missingTeacherUniIds.length > 0;
+  if (teacherIds.length === 0 && !hasMissingTeacher) teacherIds.push(TEACHER_OTHER_ID);
+  return {
+    teacherIds: uniqueSortedNumbers(teacherIds),
+    hasMissingTeacher,
+    missingTeacherKey: missingTeacherSetKey(missingTeacherUniIds, missingTeacherNames),
+  };
 }
 
 // ── Dry-run analysis ──
 
-async function analyzeCourses(courses, semInfo) {
+async function analyzeCourses(courses, semInfo, { updateExisting = false } = {}) {
   const newCourses = [];
   const existingCourses = [];
+  const courseUpdates = [];
+  const teacherSyncCourses = [];
   const newTeachers = []; // { name, uniId, institute }
+  const seenTeacherSyncKeys = new Set();
+  const seenNewCourseKeys = new Set();
   const allTeacherNames = new Set();
   const seenNewTeachers = new Set();
 
-  // Prefetch existing course codes
-  const existingCodes = new Set();
-  const rows = await sql`SELECT code FROM courses WHERE deleted_at IS NULL`;
-  for (const r of rows) existingCodes.add(r.code);
+  // Prefetch existing courses
+  const existingCoursesByCode = new Map();
+  const rows = await sql`SELECT id, name, institute, credit, code FROM courses WHERE deleted_at IS NULL`;
+  for (const r of rows) existingCoursesByCode.set(r.code, r);
 
-  // Prefetch existing teacher names
+  // Prefetch existing teachers
   const existingTeacherNames = new Set();
-  const tRows = await sql`SELECT name FROM teachers WHERE deleted_at IS NULL`;
-  for (const r of tRows) existingTeacherNames.add(r.name);
+  const teachersByUniId = new Map();
+  const teachersByName = new Map();
+  const tRows = await sql`SELECT id, name, uni_id FROM teachers WHERE deleted_at IS NULL`;
+  for (const r of tRows) {
+    existingTeacherNames.add(r.name);
+    if (r.uni_id !== null && r.uni_id !== undefined) teachersByUniId.set(String(r.uni_id), r);
+    if (r.name) teachersByName.set(r.name, r);
+  }
+
+  // Prefetch existing group teacher sets by course code so preview only syncs missing sets.
+  const groupSetsByCourseCode = new Map();
+  const groupRows = await sql`
+    SELECT c.code, array_agg(cgt.teacher_id ORDER BY cgt.teacher_id) AS teacher_ids
+    FROM course_groups cg
+    INNER JOIN courses c ON c.id = cg.course_id
+    INNER JOIN coursegroup_teachers cgt ON cgt.course_group_id = cg.id
+    WHERE cg.deleted_at IS NULL AND c.deleted_at IS NULL
+    GROUP BY c.code, cg.id`;
+  for (const r of groupRows) {
+    if (!groupSetsByCourseCode.has(r.code)) groupSetsByCourseCode.set(r.code, new Set());
+    groupSetsByCourseCode.get(r.code).add(teacherIdSetKey(r.teacher_ids || []));
+  }
 
   for (let i = 0; i < courses.length; i++) {
     const c = courses[i];
@@ -110,24 +238,43 @@ async function analyzeCourses(courses, semInfo) {
     const teacherUniIds = c.teacher || [];
     for (const n of teacherNames) allTeacherNames.add(n);
 
-    if (existingCodes.has(c.courseNumber)) {
+    const existingCourse = existingCoursesByCode.get(c.courseNumber);
+    if (existingCourse) {
       existingCourses.push(c);
+      if (updateExisting) {
+        const detail = await fetchCourseDetail(c.serialNumber, semInfo);
+        const basics = buildCourseBasics(c, detail);
+        const changes = diffCourseBasics(existingCourse, basics);
+        if (Object.keys(changes).length > 0) {
+          courseUpdates.push({ course: existingCourse, courseInfo: c, changes });
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
     } else {
-      // Fetch detail for credit/course institute
-      const detail = await fetchCourseDetail(c.serialNumber, semInfo);
-      let credit = 0;
-      let courseInstitute = "未知单位";
-      if (detail?.extend_message?.JwPkKcxxBk_instance?.credits) {
-        credit = Math.floor(parseFloat(detail.extend_message.JwPkKcxxBk_instance.credits));
+      const newCourseKey = courseTeacherSetKey(c);
+      if (!seenNewCourseKeys.has(newCourseKey)) {
+        seenNewCourseKeys.add(newCourseKey);
+        // Fetch detail for credit/course institute. ELRC lists can contain both undergraduate
+        // and graduate courses; fetchCourseDetail falls back from bksCourse to yjsCourse.
+        const detail = await fetchCourseDetail(c.serialNumber, semInfo);
+        const basics = buildCourseBasics(c, detail);
+        const credit = basics.credit ?? 0;
+        const courseInstitute = basics.institute || "未知单位";
+        newCourses.push({ ...c, _credit: credit, _institute: courseInstitute });
+        await new Promise((r) => setTimeout(r, 50));
       }
-      if (detail?.extend_message?.KczxCourseActivityBk_instance?.college_name) {
-        courseInstitute = detail.extend_message.KczxCourseActivityBk_instance.college_name;
-      }
-      newCourses.push({ ...c, _credit: credit, _institute: courseInstitute });
-      await new Promise((r) => setTimeout(r, 50));
     }
 
     // Check for new teachers, resolve their real institute
+    if (existingCourse) {
+      const { teacherIds, hasMissingTeacher, missingTeacherKey } = expectedTeacherIdsForCourse(c, teachersByUniId, teachersByName);
+      const teacherSyncKey = `${c.courseNumber}:${teacherIdSetKey(teacherIds)}:${hasMissingTeacher ? `missing:${missingTeacherKey}` : "ready"}`;
+      const existingGroupSets = groupSetsByCourseCode.get(c.courseNumber) || new Set();
+      if (!seenTeacherSyncKeys.has(teacherSyncKey) && (hasMissingTeacher || !existingGroupSets.has(teacherIdSetKey(teacherIds)))) {
+        seenTeacherSyncKeys.add(teacherSyncKey);
+        teacherSyncCourses.push(c);
+      }
+    }
     for (let j = 0; j < teacherNames.length; j++) {
       const name = teacherNames[j];
       if (existingTeacherNames.has(name) || seenNewTeachers.has(name)) continue;
@@ -140,10 +287,10 @@ async function analyzeCourses(courses, semInfo) {
   }
   console.log("");
 
-  return { newCourses, existingCourses, newTeachers, allTeacherNames };
+  return { newCourses, existingCourses, courseUpdates, teacherSyncCourses, newTeachers, allTeacherNames };
 }
 
-function printPreview({ newCourses, existingCourses, newTeachers, allTeacherNames }, semInfo) {
+function printPreview({ newCourses, existingCourses, courseUpdates, teacherSyncCourses, newTeachers, allTeacherNames }, semInfo, { updateExisting = false } = {}) {
   const divider = "─".repeat(60);
 
   console.log(`\n${divider}`);
@@ -153,7 +300,9 @@ function printPreview({ newCourses, existingCourses, newTeachers, allTeacherName
   console.log(`  Total courses from API:   ${newCourses.length + existingCourses.length}`);
   console.log(`  New courses to add:       ${newCourses.length}`);
   console.log(`  Already in database:      ${existingCourses.length}`);
+  if (updateExisting) console.log(`  Existing course updates: ${courseUpdates.length}`);
   console.log(`  New teachers to create:   ${newTeachers.length}`);
+  console.log(`  Courses to sync teachers: ${newCourses.length + teacherSyncCourses.length}`);
   console.log(`  Total unique teachers:    ${allTeacherNames.size}`);
 
   if (newCourses.length > 0) {
@@ -176,6 +325,19 @@ function printPreview({ newCourses, existingCourses, newTeachers, allTeacherName
     }
   }
 
+  if (courseUpdates.length > 0) {
+    console.log(`\n${divider}`);
+    console.log(`  Existing Course Updates (${courseUpdates.length})`);
+    console.log(`${divider}`);
+    for (const u of courseUpdates) {
+      const parts = [];
+      if (u.changes.name) parts.push(`名称: ${u.changes.name.from} → ${u.changes.name.to}`);
+      if (u.changes.credit) parts.push(`学分: ${u.changes.credit.from} → ${u.changes.credit.to}`);
+      if (u.changes.institute) parts.push(`学院: ${u.changes.institute.from || "未知"} → ${u.changes.institute.to}`);
+      console.log(`     Δ ${u.courseInfo.courseNumber.padEnd(12)} ${parts.join("; ")}`);
+    }
+  }
+
   if (newTeachers.length > 0) {
     console.log(`\n${divider}`);
     console.log(`  New Teachers (${newTeachers.length})`);
@@ -189,7 +351,7 @@ function printPreview({ newCourses, existingCourses, newTeachers, allTeacherName
 
   if (existingCourses.length > 0 && existingCourses.length <= 20) {
     console.log(`\n${divider}`);
-    console.log(`  Existing Courses (skipped, ${existingCourses.length})`);
+    console.log(`  Existing Courses (${updateExisting ? "checked" : "skipped"}, ${existingCourses.length})`);
     console.log(`${divider}`);
     for (const c of existingCourses) {
       console.log(`     ✓ ${c.courseNumber.padEnd(12)} ${c.name_}`);
@@ -284,69 +446,89 @@ async function findOrCreateTeacher(uniId, name, courseInstitute) {
   return newTeacher;
 }
 
+async function updateCourseBasics(update) {
+  const nextName = update.changes.name?.to ?? update.course.name;
+  const nextCredit = update.changes.credit?.to ?? (Number(update.course.credit) || 0);
+  const nextInstitute = update.changes.institute?.to ?? update.course.institute ?? "";
+
+  await sql`UPDATE courses SET
+    name = ${nextName},
+    credit = ${nextCredit},
+    institute = ${nextInstitute},
+    updated_at = NOW()
+    WHERE id = ${update.course.id}`;
+
+  console.log(`  ~ ${update.course.code} updated`);
+}
+
 async function processCourse(courseInfo, semInfo) {
   const detail = await fetchCourseDetail(courseInfo.serialNumber, semInfo);
 
-  let credit = 0;
-  if (detail?.extend_message?.JwPkKcxxBk_instance?.credits) {
-    credit = Math.floor(parseFloat(detail.extend_message.JwPkKcxxBk_instance.credits));
-  }
-  let institute = detail?.extend_message?.KczxCourseActivityBk_instance?.college_name || "未知单位";
+  const credit = detail?.credit ?? 0;
+  const institute = detail?.institute || "未知单位";
 
   let [course] = await sql`SELECT * FROM courses WHERE code = ${courseInfo.courseNumber} AND deleted_at IS NULL`;
+  let courseCreated = false;
 
   if (!course) {
     [course] = await sql`INSERT INTO courses (name, institute, credit, code, scores, comment_count, created_at, updated_at)
       VALUES (${courseInfo.name_}, ${institute}, ${credit}, ${courseInfo.courseNumber}, ${[0, 0, 0, 0]}, 0, NOW(), NOW()) RETURNING *`;
-
-    const teacherIds = [];
-    const teachers = {};
-    for (let i = 0; i < (courseInfo.teacher || []).length; i++) {
-      const uniIdStr = courseInfo.teacher[i];
-      const name = (courseInfo.teacher_names || [])[i] || "";
-      if (uniIdStr && name) teachers[uniIdStr] = name;
-    }
-
-    for (const [uniIdStr, name] of Object.entries(teachers)) {
-      const uniId = parseInt(uniIdStr, 10);
-      if (isNaN(uniId)) continue;
-      const teacher = await findOrCreateTeacher(uniId, name, institute);
-      teacherIds.push(teacher.id);
-    }
-
-    if (teacherIds.length === 0) teacherIds.push(TEACHER_OTHER_ID);
-
-    const existingGroups = await sql`
-      SELECT cg.id, array_agg(cgt.teacher_id ORDER BY cgt.teacher_id) as teacher_ids
-      FROM course_groups cg
-      INNER JOIN coursegroup_teachers cgt ON cg.id = cgt.course_group_id
-      WHERE cg.course_id = ${course.id} AND cg.deleted_at IS NULL
-      GROUP BY cg.id`;
-
-    const sortedIds = [...teacherIds].sort((a, b) => a - b);
-    const isDuplicate = existingGroups.some((g) => {
-      const existing = (g.teacher_ids || []).map(Number).sort((a, b) => a - b);
-      return existing.length === sortedIds.length && existing.every((v, i) => v === sortedIds[i]);
-    });
-
-    if (isDuplicate) return;
-
-    const [group] = await sql`INSERT INTO course_groups (code, course_id, scores, comment_count, created_at, updated_at)
-      VALUES ('', ${course.id}, ${[0, 0, 0, 0]}, 0, NOW(), NOW()) RETURNING *`;
-
-    for (const tid of teacherIds) {
-      await sql`INSERT INTO coursegroup_teachers (course_group_id, teacher_id) VALUES (${group.id}, ${tid}) ON CONFLICT DO NOTHING`;
-      await sql`INSERT INTO course_teachers (course_id, teacher_id) VALUES (${course.id}, ${tid}) ON CONFLICT DO NOTHING`;
-    }
-
-    console.log(`  + ${courseInfo.courseNumber} ${courseInfo.name_} (course=${course.id} group=${group.id})`);
-    await new Promise((r) => setTimeout(r, 50));
+    courseCreated = true;
   }
+
+  const teacherIds = [];
+  const teachers = {};
+  for (let i = 0; i < (courseInfo.teacher || []).length; i++) {
+    const uniIdStr = courseInfo.teacher[i];
+    const name = (courseInfo.teacher_names || [])[i] || "";
+    if (uniIdStr && name) teachers[uniIdStr] = name;
+  }
+
+  for (const [uniIdStr, name] of Object.entries(teachers)) {
+    const uniId = parseInt(uniIdStr, 10);
+    if (isNaN(uniId)) continue;
+    const teacher = await findOrCreateTeacher(uniId, name, institute);
+    const teacherId = Number(teacher.id);
+    if (Number.isFinite(teacherId)) teacherIds.push(teacherId);
+  }
+
+  if (teacherIds.length === 0) teacherIds.push(TEACHER_OTHER_ID);
+
+  const existingGroups = await sql`
+    SELECT cg.id, array_agg(cgt.teacher_id ORDER BY cgt.teacher_id) as teacher_ids
+    FROM course_groups cg
+    INNER JOIN coursegroup_teachers cgt ON cg.id = cgt.course_group_id
+    WHERE cg.course_id = ${course.id} AND cg.deleted_at IS NULL
+    GROUP BY cg.id`;
+
+  const sortedIds = [...new Set(teacherIds.map(Number))].sort((a, b) => a - b);
+  const isDuplicate = existingGroups.some((g) => {
+    const existing = [...new Set((g.teacher_ids || []).map(Number))].sort((a, b) => a - b);
+    return existing.length === sortedIds.length && existing.every((v, i) => v === sortedIds[i]);
+  });
+
+  if (isDuplicate) {
+    if (courseCreated) console.log(`  + ${courseInfo.courseNumber} ${courseInfo.name_} (course=${course.id})`);
+    return { courseCreated, groupCreated: false };
+  }
+
+  const [group] = await sql`INSERT INTO course_groups (code, course_id, scores, comment_count, created_at, updated_at)
+    VALUES ('', ${course.id}, ${[0, 0, 0, 0]}, 0, NOW(), NOW()) RETURNING *`;
+
+  for (const tid of sortedIds) {
+    await sql`INSERT INTO coursegroup_teachers (course_group_id, teacher_id) VALUES (${group.id}, ${tid}) ON CONFLICT DO NOTHING`;
+    await sql`INSERT INTO course_teachers (course_id, teacher_id) VALUES (${course.id}, ${tid}) ON CONFLICT DO NOTHING`;
+  }
+
+  const marker = courseCreated ? "+" : "~";
+  console.log(`  ${marker} ${courseInfo.courseNumber} ${courseInfo.name_} (course=${course.id} group=${group.id})`);
+  await new Promise((r) => setTimeout(r, 50));
+  return { courseCreated, groupCreated: true };
 }
 
 // ── Entry point ──
 
-export async function importELRC(semesterArg, { dryRun = false } = {}) {
+export async function importELRC(semesterArg, { dryRun = false, updateExisting = false } = {}) {
   const semInfo = parseSemester(semesterArg);
   console.log(`Semester: ${semInfo.fullLabel} (year=${semInfo.year}, term=${semInfo.termNum})`);
 
@@ -359,31 +541,47 @@ export async function importELRC(semesterArg, { dryRun = false } = {}) {
   }
 
   // Always analyze and preview first
-  const analysis = await analyzeCourses(courses, semInfo);
-  printPreview(analysis, semInfo);
+  const analysis = await analyzeCourses(courses, semInfo, { updateExisting });
+  printPreview(analysis, semInfo, { updateExisting });
 
   if (dryRun) {
     console.log("Dry run complete. No changes were made.");
     return;
   }
 
-  if (analysis.newCourses.length === 0) {
-    console.log("No new courses to import. Done.");
+  if (analysis.newCourses.length === 0 && analysis.courseUpdates.length === 0 && analysis.teacherSyncCourses.length === 0) {
+    console.log("No new courses, course updates, or teacher groups to sync. Done.");
     return;
   }
 
-  const ok = await confirm(`Import ${analysis.newCourses.length} new courses?`);
+  const actions = [];
+  if (analysis.newCourses.length > 0) actions.push(`${analysis.newCourses.length} new courses`);
+  if (analysis.teacherSyncCourses.length > 0) actions.push(`${analysis.teacherSyncCourses.length} existing courses for teacher sync`);
+  if (analysis.courseUpdates.length > 0) actions.push(`${analysis.courseUpdates.length} existing course updates`);
+  const ok = await confirm(`Apply ${actions.join(" and ")}?`);
   if (!ok) { console.log("Aborted."); return; }
 
-  let imported = 0;
-  for (const courseInfo of courses) {
+  let updated = 0;
+  for (const update of analysis.courseUpdates) {
     try {
-      await processCourse(courseInfo, semInfo);
-      imported++;
+      await updateCourseBasics(update);
+      updated++;
+    } catch (err) {
+      console.error(`Error updating ${update.course.code}: ${err.message}`);
+    }
+  }
+
+  let imported = 0;
+  let groupsSynced = 0;
+  for (const courseInfo of [...analysis.newCourses, ...analysis.teacherSyncCourses]) {
+    try {
+      const result = await processCourse(courseInfo, semInfo);
+      if (result?.courseCreated) imported++;
+      if (result?.groupCreated && !result.courseCreated) groupsSynced++;
     } catch (err) {
       console.error(`Error processing ${courseInfo.courseNumber}: ${err.message}`);
     }
   }
 
-  console.log(`\nFinished: ${imported} courses processed`);
+  console.log(`\nFinished: ${imported} courses imported, ${groupsSynced} teacher groups synced, ${updated} courses updated`);
 }

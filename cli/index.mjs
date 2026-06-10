@@ -8,11 +8,12 @@
  *   unset_admin <user_id>                  Remove admin
  *   set_community_admin <user_id>          Set user as community admin
  *   unset_community_admin <user_id>        Remove community admin
- *   import_elrc <semester>                 Import courses from ELRC API (e.g. 2024-2025-3)
+ *   import_elrc <semester> [--dry-run] [--update-existing] Import courses from ELRC API
  *   import_teacher <csv_path>              Update teacher info from CSV
  *   import_course <csv_dir>                Import courses from CSV directory
  *   import_teacher_uniid <json_path>       Update teacher UniIDs from JSON
  *   rm_duplicate_group                     Merge duplicate course groups
+ *   remove_student_teacher [--dry-run]     Merge student-ID teachers into course assistant
  *   clear_userdata Yes_Confirm             Delete ALL user data (dangerous!)
  *   stats                                  Show database statistics
  *   test_mail <to> [options]                Send a test email
@@ -31,12 +32,13 @@ Commands:
   unset_admin <user_id>               Remove admin
   set_community_admin <user_id>       Set user as community admin
   unset_community_admin <user_id>     Remove community admin
-  import_elrc <semester> [--dry-run]  Import from ELRC API (e.g. 2024-2025-3)
+  import_elrc <semester> [--dry-run] [--update-existing] Import from ELRC API (e.g. 2024-2025-3)
   import_teacher <csv_path>           Update teacher info from CSV
   import_course <csv_dir>             Import courses from CSV directory
   import_teacher_uniid <json_path>    Update teacher UniIDs from JSON
   update_teacher_institute [--dry-run] Update teacher institutes from ELRC
   rm_duplicate_group                  Merge duplicate course groups
+  remove_student_teacher [--dry-run]  Merge student-ID teachers into course assistant
   clear_userdata Yes_Confirm          Delete ALL user data (dangerous!)
   stats                               Show database statistics
   test_mail <to> [options]            Send a test email
@@ -67,9 +69,10 @@ try {
     case "import_elrc": {
       if (!args[1]) { console.error("Missing <semester>. e.g. 2024-2025-3"); process.exit(1); }
       const dryRun = args.includes("--dry-run");
+      const updateExisting = args.includes("--update-existing") || args.includes("--full");
       const semester = args.find((a) => a !== "import_elrc" && !a.startsWith("--"));
       const { importELRC } = await import("./commands/import-elrc.mjs");
-      await importELRC(semester, { dryRun });
+      await importELRC(semester, { dryRun, updateExisting });
       break;
     }
     case "import_teacher": {
@@ -99,6 +102,12 @@ try {
     case "rm_duplicate_group": {
       const { rmDuplicateGroup } = await import("./commands/rm-duplicate-group.mjs");
       await rmDuplicateGroup();
+      break;
+    }
+    case "remove_student_teacher": {
+      const dryRun = args.includes("--dry-run");
+      const { removeStudentTeacher } = await import("./commands/remove-student-teacher.mjs");
+      await removeStudentTeacher({ dryRun });
       break;
     }
     case "clear_userdata": {
@@ -148,3 +157,5 @@ try {
   console.error("ERROR:", err.message || err);
   process.exit(1);
 }
+
+process.exit(0);

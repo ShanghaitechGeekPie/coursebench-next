@@ -249,18 +249,19 @@ node cli/index.mjs <command> [args...]
 | `unset_admin <user_id>` | 取消管理员 |
 | `set_community_admin <user_id>` | 设置用户为社区管理员 |
 | `unset_community_admin <user_id>` | 取消社区管理员 |
-| `import_elrc <semester> [--dry-run]` | 从 ELRC API 导入课程 |
+| `import_elrc <semester> [--dry-run] [--update-existing]` | 从 ELRC API 导入课程；可更新已有课程基础信息 |
 | `import_teacher <csv_path>` | 从 CSV 更新教师信息 |
 | `import_course <csv_dir>` | 从 CSV 目录导入课程 |
 | `update_teacher_institute [--dry-run]` | 从 ELRC 搜索 API 更新教师所属学院 |
 | `import_teacher_uniid <json_path>` | 从 JSON 更新教师工号 |
 | `rm_duplicate_group` | 合并重复授课组 |
+| `remove_student_teacher [--dry-run]` | 将十位 20xxxxxxxx 工号教师合并为课程助教，并软删除对应教师页 |
 | `test_mail <to> [options]` | 发送测试邮件（验证 SMTP 配置） |
 | `clear_userdata Yes_Confirm` | 删除所有用户数据（危险！） |
 
 ### ELRC 课程导入
 
-每学期从上海科技大学 ELRC 系统导入新课程。
+每学期从上海科技大学 ELRC 系统同步课程、教师和授课组。
 
 ```bash
 # Dry run：仅预览，不写入数据库
@@ -268,6 +269,9 @@ pnpm cli import_elrc 2024-2025-2 --dry-run
 
 # 实际导入
 pnpm cli import_elrc 2024-2025-2
+
+# 同步已有课程的名称、学分、开课单位
+pnpm cli import_elrc 2024-2025-2 --update-existing
 ```
 
 学期参数格式为 `<起始年>-<结束年>-<学期号>`，学期号：1=秋季，2=春季，3=夏季。
@@ -279,6 +283,8 @@ Dry run 模式会：
    - 按学院分组的新课程列表（课程号、名称、学分、教师）
    - 新教师列表
    - 已存在课程统计
+   - 需要同步授课组的课程数
+   - 使用 `--update-existing` 时，额外预览已有课程的名称、学分、开课单位变更
 
 ### 教师数据导入
 
